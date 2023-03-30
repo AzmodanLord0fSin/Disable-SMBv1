@@ -1,0 +1,87 @@
+#Requires -RunAsAdministrator
+<#
+.SYNOPSIS
+	Disable SMBv1
+
+.DESCRIPTION
+	Script zum Deaktivieren von SMBv1 auf Windows Maschinen ab Version 8
+
+.EXAMPLE
+	Set-SMBv1Disabled
+   
+#>
+
+function _execSC
+{
+    $sccmd = 'sc.exe config mrxsmb10 start=disabled';
+    Invoke-Expression -Command:$sccmd;
+    $sccmd = 'sc.exe config lanmanworkstation depend= bowser/mrxsmb20/nsi';
+    Invoke-Expression -Command:$sccmd;
+}
+
+function _getRegKey
+{
+    param (
+        [Parameter(Mandatory=$true)]
+        [string] $Path = $null,
+        [Parameter(Mandatory=$true)]
+        [string] $Key = $null
+    );
+
+    Set-Variable -Name ErrorActionPreference -Value SilentlyContinue;
+    if((Get-PSDrive HKLM).Root -ne "HKEY_LOCAL_MACHINE")
+    {
+        New-PSDrive -Name HKLM -Root HKEY_LOCAL_MACHINE -PSProvider Registry
+    }
+    Set-Variable -Name ErrorActionPreference -Value Continue;
+
+    return (Get-ItemProperty -Name $Key -Path $Path);
+};
+
+function Set-SMBv1Disabled
+{
+    <#
+    .SYNOPSIS
+        Deaktivieren von SMBv1
+
+    .DESCRIPTION
+        Script zum Deaktivieren von SMBv1 auf Windows Maschinen ab Version 8
+
+    .EXAMPLE
+        Set-SMBv1Disabled
+       
+     #>
+    
+    Set-Variable -Name ErrorActionPreference -Value SilentlyContinue;
+    if((Get-SmbServerConfiguration).EnableSMB1Protocol)
+    {
+        Write-Host "WARNING: Endangered SMBv1 Protocol is Enabled - Disable it! " -ForegroundColor Red -NoNewline
+        Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force
+        Write-Host "done" -ForegroundColor Green
+    } else {
+        Write-Host "SMBv1 Protocol is Disabled" -ForegroundColor Green
+    }
+    Set-Variable -Name ErrorActionPreference -Value Continue;
+    
+    $_smbreg = (_getRegKey -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Key "SMB1");
+    if (($_smbreg | Select-Object SMB1) -ne 0)
+    {
+        Write-Host "WARNING: SMB1 in Registry:LanmanServer Enabled - Disable it! " -ForegroundColor Red -NoNewline
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name SMB1 -Type DWORD -Value 0 -Force
+        Write-Host "done" -ForegroundColor Green
+    }
+
+    _execSC
+
+    Write-Host "WindowsOptionalFeature SMB1Protocol" -ForegroundColor Cyan
+    $_q = Read-Host "Start Uninstall-WindowsOptionalFeature SMB1Protocol or skip this action? (y/n)";
+    if($_q -eq "y")
+    {
+        Disable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol -NoRestart -Verbose
+    }
+    Write-Host "Script Finished..." -ForegroundColor Green
+};
+
+Set-SMBv1Disabled
+
+## EOF
